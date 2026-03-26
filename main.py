@@ -137,18 +137,26 @@ async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         msg = await update.message.reply_text("جاري التحميل... 📥")
-        try:
-            if not os.path.exists('downloads'): os.makedirs('downloads')
-            opts = {'format': 'best', 'outtmpl': 'downloads/%(id)s.%(ext)s', 'quiet': True}
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                info = ydl.extract_info(text, download=True)
-                file = ydl.prepare_filename(info)
-            with open(file, 'rb') as v:
-                await update.message.reply_video(video=v, caption="تم التحميل بواسطة بوتك ✅")
-            os.remove(file)
-            await msg.delete()
-        except Exception as e:
-            await msg.edit_text(f"❌ خطأ في التحميل: {str(e)}")
+               ydl_opts = {
+                'format': 'best',
+                'outtmpl': 'downloads/%(id)s.%(ext)s',
+                'quiet': True,
+                'no_warnings': True,
+                'nocheckcertificate': True, # لتجاوز مشاكل شهادات الأمان
+                'ignoreerrors': True,       # لتجاوز الأخطاء البسيطة ومتابعة التحميل
+                'cookiefile': None,         # تأكد من عدم وجود ملف كوكيز تالف
+                'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36', # للتمويه كمتصفح حقيقي
+            }
+             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(text, download=True)
+            file = ydl.prepare_filename(info)
+
+        with open(file, 'rb') as v:
+            await update.message.reply_video(video=v, caption="تم التحميل بنجاح ✅")
+            
+        os.remove(file)
+        await msg.delete()
+
 
 # تشغيل البوت
 if __name__ == '__main__':
