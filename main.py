@@ -1,200 +1,160 @@
-import os
-import asyncio
-import yt_dlp
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-
-# ضع التوكن الخاص بك هنا
-TOKEN = '8674002969:AAHF1WybVzgoTXwg9Qumrxh0PHuEtWxdRbY'
-
-# إعدادات yt-dlp للتحميل من تيك توك
-YDL_OPTIONS = {
-    'format': 'best',
-    'outtmpl': 'downloads/%(id)s.%(ext)s',
-    'noplaylist': True,
-    'quiet': True,
-}
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("أهلاً بك! أرسل لي رابط فيديو تيك توك وسأقوم بتحميله لك فوراً.")
-
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    url = update.message.text
-    
-    if "tiktok.com" not in url:
-        return # يتجاهل الرسائل التي لا تحتوي على رابط تيك توك
-
-    status_msg = await update.message.reply_text("جاري المعالجة... انتظر قليلاً ⏳")
-
-    try:
-        # إنشاء مجلد التحميل إذا لم يكن موجوداً
-        if not os.path.exists('downloads'):
-            os.makedirs('downloads')
-
-        # التحميل باستخدام yt-dlp
-        with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
-            info = ydl.extract_info(url, download=True)
-            filename = ydl.prepare_filename(info)
-
-        # إرسال الفيديو للمستخدم
-        with open(filename, 'rb') as video:
-            await update.message.reply_video(video=video, caption="تم التحميل بواسطة بوتك الخاص ✅")
-
-        # حذف الملف بعد الإرسال لتوفير المساحة
-        os.remove(filename)
-        await status_msg.delete()
-
-    except Exception as e:
-        await status_msg.edit_text(f"عذراً، حدث خطأ أثناء التحميل: {str(e)}")
-
-def main():
-    # بناء التطبيق
-    application = Application.builder().token(TOKEN).build()
-
-    # الأوامر والمستقبلات
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
-    print("البوت يعمل الآن...")
-    application.run_polling()
-
-if __name__ == '__main__':
-    main()import os
+ import os
 import json
+import asyncio
 import yt_dlp
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 
-# --- الإعدادات الأولية ---
-TOKEN = 'YOUR_BOT_TOKEN_HERE'
-ADMIN_ID = 123456789  # معرفك الخاص
+# ================= إعدادات المطور الأساسية =================
+TOKEN = '8674002969:AAHF1WybVzgoTXwg9Qumrxh0PHuEtWxdRbY'  # ضع توكن بوتك هنا
+ADMIN_ID = 7481039233          # ضع معرفك (ID) هنا لتفعيل لوحة التحكم
+# ==========================================================
 
-# ملفات البيانات
-DB_FILE = 'users.json'
-SETTINGS_FILE = 'settings.json'
+DB_FILE = 'database.json'
 
-# --- دالات إدارة البيانات ---
-def get_settings():
-    if not os.path.exists(SETTINGS_FILE):
-        default = {"channel_id": "@YourChannel", "channel_link": "https://t.me/YourChannel", "force_sub": True}
-        with open(SETTINGS_FILE, 'w') as f: json.dump(default, f)
-        return default
-    with open(SETTINGS_FILE, 'r') as f: return json.load(f)
+# دالات إدارة البيانات
+def load_db():
+    if not os.path.exists(DB_FILE):
+        data = {
+            "users": [],
+            "settings": {
+                "channel_id": "@YourChannel", 
+                "channel_link": "https://t.me/YourChannel", 
+                "force_sub": True
+            }
+        }
+        save_db(data)
+        return data
+    with open(DB_FILE, 'r', encoding='utf-8') as f: return json.load(f)
 
-def save_settings(data):
-    with open(SETTINGS_FILE, 'w') as f: json.dump(data, f)
+def save_db(data):
+    with open(DB_FILE, 'w', encoding='utf-8') as f: json.dump(data, f, ensure_ascii=False, indent=4)
 
-def load_users():
-    if os.path.exists(DB_FILE):
-        with open(DB_FILE, 'r') as f: return json.load(f)
-    return []
-
-# --- التحقق من الاشتراك ---
-async def check_sub(context, user_id):
-    settings = get_settings()
-    if not settings['force_sub']: return True
+# التحقق من الاشتراك
+async def is_subscribed(context, user_id):
+    db = load_db()
+    if not db['settings']['force_sub']: return True
     try:
-        member = await context.bot.get_chat_member(chat_id=settings['channel_id'], user_id=user_id)
+        member = await context.bot.get_chat_member(chat_id=db['settings']['channel_id'], user_id=user_id)
         return member.status in ['creator', 'administrator', 'member']
     except: return False
 
-# --- الأوامر ---
+# أمر البدء /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    # حفظ المستخدم
-    users = load_users()
-    if user_id not in users:
-        users.append(user_id)
-        with open(DB_FILE, 'w') as f: json.dump(users, f)
-
-    settings = get_settings()
+    db = load_db()
     
-    # لوحة التحكم للمطور
+    # حفظ المستخدم الجديد
+    if user_id not in db['users']:
+        db['users'].append(user_id)
+        save_db(db)
+
+    # إذا كان المستخدم هو المطور
     if user_id == ADMIN_ID:
         keyboard = [
             [InlineKeyboardButton("📊 الإحصائيات", callback_data="stats"), InlineKeyboardButton("📢 إذاعة", callback_data="broadcast")],
-            [InlineKeyboardButton("📢 إعدادات القناة", callback_data="edit_channel")],
-            [InlineKeyboardButton("🔛 تفعيل/تعطيل الاشتراك", callback_data="toggle_sub")]
+            [InlineKeyboardButton("⚙️ إعدادات القناة", callback_data="set_chan")],
+            [InlineKeyboardButton(f"الاشتراك الإجباري: {'✅' if db['settings']['force_sub'] else '❌'}", callback_data="toggle_sub")]
         ]
-        await update.message.reply_text(f"مرحباً مطور! حالة الاشتراك الآن: {'مفعل ✅' if settings['force_sub'] else 'معطل ❌'}", 
-                                       reply_markup=InlineKeyboardMarkup(keyboard))
+        await update.message.reply_text(
+            f"🛠 **لوحة تحكم المطور**\n\nالقناة الحالية: {db['settings']['channel_id']}\nحالة الاشتراك: {'مفعل ✅' if db['settings']['force_sub'] else 'معطل ❌'}",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
         return
 
-    # فحص الاشتراك للمستخدمين
-    if not await check_sub(context, user_id):
-        keyboard = [[InlineKeyboardButton("اشترك هنا 📢", url=settings['channel_link'])],
-                    [InlineKeyboardButton("تم الاشتراك ✅", callback_data="verify")]]
-        await update.message.reply_text("عذراً، اشترك بالقناة أولاً لتتمكن من استخدام البوت!", reply_markup=InlineKeyboardMarkup(keyboard))
+    # فحص الاشتراك للمستخدم العادي
+    if not await is_subscribed(context, user_id):
+        keyboard = [[InlineKeyboardButton("اضغط هنا للاشتراك 📢", url=db['settings']['channel_link'])],
+                    [InlineKeyboardButton("تم الاشتراك ✅", callback_data="check_me")]]
+        await update.message.reply_text("عذراً! يجب عليك الاشتراك في القناة أولاً لاستخدام البوت.", reply_markup=InlineKeyboardMarkup(keyboard))
     else:
-        await update.message.reply_text("أهلاً بك! أرسل رابط تيك توك للتحميل.")
+        await update.message.reply_text("أهلاً بك! أرسل لي رابط فيديو تيك توك وسأقوم بتحميله لك فوراً. 📥")
 
-# --- معالجة الأزرار ---
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# معالجة الأزرار
+async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    settings = get_settings()
+    db = load_db()
+    user_id = query.from_user.id
+
+    if user_id != ADMIN_ID and query.data != "check_me": return
 
     if query.data == "stats":
-        await query.message.reply_text(f"عدد المستخدمين: {len(load_users())}")
-    
-    elif query.data == "toggle_sub":
-        settings['force_sub'] = not settings['force_sub']
-        save_settings(settings)
-        await query.edit_message_text(f"تم تغيير حالة الاشتراك إلى: {'مفعل ✅' if settings['force_sub'] else 'معطل ❌'}")
+        await query.message.reply_text(f"👤 عدد مستخدمي البوت: {len(db['users'])}")
 
-    elif query.data == "edit_channel":
-        context.user_data['action'] = 'set_channel'
-        await query.message.reply_text("أرسل معرف القناة الجديد (مع الـ @) ثم مسافة ثم رابط القناة.\nمثال:\n@MyChannel https://t.me/MyChannel")
+    elif query.data == "toggle_sub":
+        db['settings']['force_sub'] = not db['settings']['force_sub']
+        save_db(db)
+        await query.message.reply_text(f"تم تغيير حالة الاشتراك إلى: {'مفعل ✅' if db['settings']['force_sub'] else 'معطل ❌'}")
 
     elif query.data == "broadcast":
-        context.user_data['action'] = 'bc'
-        await query.message.reply_text("أرسل نص الإذاعة الآن:")
+        context.user_data['state'] = 'BC'
+        await query.message.reply_text("أرسل الآن الرسالة (نص فقط) التي تريد إذاعتها لجميع المستخدمين:")
 
-# --- معالجة الرسائل ---
-async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    elif query.data == "set_chan":
+        context.user_data['state'] = 'SET'
+        await query.message.reply_text("أرسل معرف القناة الجديد ثم الرابط (بينهما مسافة).\nمثال:\n@MyChannel https://t.me/MyChannel")
+
+    elif query.data == "check_me":
+        if await is_subscribed(context, user_id):
+            await query.edit_message_text("✅ تم التحقق بنجاح! يمكنك الآن إرسال روابط تيك توك.")
+        else:
+            await query.answer("أنت غير مشترك في القناة بعد! ❌", show_alert=True)
+
+# معالجة الرسائل (تحميل + إعدادات المطور)
+async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text
-    action = context.user_data.get('action')
+    db = load_db()
+    state = context.user_data.get('state')
 
-    # إعدادات القناة من داخل البوت
-    if action == 'set_channel' and user_id == ADMIN_ID:
-        try:
-            parts = text.split()
-            settings = get_settings()
-            settings['channel_id'] = parts[0]
-            settings['channel_link'] = parts[1]
-            save_settings(settings)
-            await update.message.reply_text("✅ تم تحديث بيانات القناة بنجاح!")
-        except:
-            await update.message.reply_text("❌ خطأ في التنسيق! تأكد من إرسال المعرف ثم الرابط.")
-        context.user_data['action'] = None
-        return
-
-    # الإذاعة
-    if action == 'bc' and user_id == ADMIN_ID:
-        users = load_users()
-        for u in users:
-            try: await context.bot.send_message(u, text)
+    # إعدادات المطور
+    if user_id == ADMIN_ID and state == 'BC':
+        count = 0
+        for u in db['users']:
+            try:
+                await context.bot.send_message(chat_id=u, text=text)
+                count += 1
             except: continue
-        await update.message.reply_text("✅ تم إرسال الإذاعة للجميع.")
-        context.user_data['action'] = None
+        await update.message.reply_text(f"✅ تمت الإذاعة لـ {count} مستخدم.")
+        context.user_data['state'] = None
         return
 
-    # التحميل (TikTok)
-    if "tiktok.com" in text:
-        if not await check_sub(context, user_id):
-            await update.message.reply_text("اشترك بالقناة أولاً!")
-            return
-        # كود التحميل هنا (نفس الكود السابق باستخدام yt-dlp)
-        await update.message.reply_text("جاري التحميل... 📥")
+    if user_id == ADMIN_ID and state == 'SET':
+        try:
+            cid, clink = text.split()
+            db['settings']['channel_id'], db['settings']['channel_link'] = cid, clink
+            save_db(db)
+            await update.message.reply_text("✅ تم تحديث بيانات القناة.")
+        except: await update.message.reply_text("❌ خطأ! التنسيق: @المعرف الرابط")
+        context.user_data['state'] = None
+        return
 
-def main():
+    # نظام التحميل
+    if "tiktok.com" in text:
+        if not await is_subscribed(context, user_id):
+            await update.message.reply_text("يجب الاشتراك في القناة أولاً!")
+            return
+
+        msg = await update.message.reply_text("جاري التحميل... 📥")
+        try:
+            if not os.path.exists('downloads'): os.makedirs('downloads')
+            opts = {'format': 'best', 'outtmpl': 'downloads/%(id)s.%(ext)s', 'quiet': True}
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(text, download=True)
+                file = ydl.prepare_filename(info)
+            with open(file, 'rb') as v:
+                await update.message.reply_video(video=v, caption="تم التحميل بواسطة بوتك ✅")
+            os.remove(file)
+            await msg.delete()
+        except Exception as e:
+            await msg.edit_text(f"❌ خطأ في التحميل: {str(e)}")
+
+# تشغيل البوت
+if __name__ == '__main__':
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(button_handler))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
+    app.add_handler(CallbackQueryHandler(handle_buttons))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_msg))
+    print("البوت يعمل الآن بكامل الصلاحيات...")
     app.run_polling()
-
-if __name__ == '__main__':
-    main()
-
